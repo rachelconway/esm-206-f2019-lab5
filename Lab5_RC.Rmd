@@ -1,5 +1,5 @@
 ---
-title: "ESm 206 Lab 5"
+title: "Esm 206 Lab 5"
 author: "Rachel Conway"
 date: "10/29/2019"
 output: html_document
@@ -7,5 +7,230 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+##### Lab 5 objectives
+
+- Learn to parse dates with'lubridate'
+- Get counts of obs w count()
+- Uncount() rows
+- One and two-sample t-test
+- Create a heat map w geom_tile()
+
+```{r, include= FALSE}
+
+# Attach packages and read in data, clean up column names, change -99999 to NA
+
+library(tidyverse)
+library(here)
+library(janitor)
+
+lobster_abundance <- read_csv(here::here("data", "lobster_abundance.csv"), na= "-99999") %>% 
+  janitor::clean_names()
+
+```
+
+Want each obs to have own row
+Use tidyr::uncount() fxn to convert our lobster data from frequency format to case format
+
+```{r}
+
+lobster_tidy <- lobster_abundance %>%
+  tidyr::uncount(lobster_count)
+
+# data now truly in tidy format- uncount makes it easy to get from freq to case format, more ggplot friendly
+
+```
+
+#### Exploratory data visulization
+
+We're only going to consider 'site' as our variable of interest
+
+```{r}
+
+ggplot(lobster_tidy, aes(x= site, y= size_mm)) +
+  geom_jitter(aes(color= site),
+              alpha= 0.5,
+              width= 0.2)
+
+# too many obs to see clear dist
+# ask questions about groups-- seems have relatively simiar means-- tru to figure out where differences come from
+
+# Now a histogram
+
+ggplot(lobster_tidy, aes(x= size_mm)) +
+  geom_histogram(aes(fill= site)) +
+  facet_wrap(~site, scales= "free")
+
+ggplot(lobster_tidy, aes(sample= size_mm)) +
+  geom_qq()+
+  facet_wrap(~site)
+
+# assess distribution of points to determine if dist is normal, look at outliers
+# by looking at hist and qq, observations look close to normal, only look at linear relationship w qq, slope means nothing
+# even if samples did not look normally dist, might still be comfortable saying means are normally dist due to central limit theorem
+
+```
+
+#### Convert the 'date' column to class 'Date' 
+
+using lubrudate package to convert to Date format, and then help us easily porse month and year
+
+```{r}
+
+lobster_date <- lobster_tidy %>%
+  mutate(
+    date_new= lubridate::mdy(date)
+  )
+
+# in console to check: class(lobster_date$date_new)
+
+# now want to separate month and year so we can later group by those metrics
+# use month and year fxns from lubridate
+
+```
+
+Now let's parse year and month using lubridate::month() and lubridate::year():
+
+```{r}
+
+lobster_parse_date <- lobster_date %>%
+  mutate(
+    obs_month= lubridate::month(date_new, label= TRUE),
+    obs_year= lubridate::year(date_new)
+  )
+
+# in console to check: class(lobster_parse_date$obs_month), levels(lobster_parse_date$obs_month)
+
+```
+
+Questions about how many obs observed there-- different important groupings not based on freq counts
+
+Now let's find counts of observed lobsters based on diff hierarchical groupings using the count fxn
+
+First, let's count lobs by year and month
+```{r}
+
+lobster_ym <- lobster_parse_date %>%
+  dplyr::count(obs_year, obs_month)
+
+lobster_y <- lobster_parse_date %>%
+  dplyr::count(obs_year)
+
+lobster_site <- lobster_parse_date %>%
+  dplyr::count(site)
+
+# having data in tidy format allows us to create groupings based on what we find to be the most important parts of the data-- we as user of data get to decide what diff groupings we want to make
+
+```
+
+If we want to create a summary table that contains stats other than counts by group, it's easier to use group_by() +n()
+
+```{r}
+
+# only interested in site, ind of month and year
+# we don't just want a count, want summ stats as well
+
+lobster_summary <- lobster_parse_date %>%
+  group_by(site) %>%
+  summarize(
+    mean_size= mean(size_mm, na.rm= TRUE),
+    sd_size= sd(size_mm, na.rm= TRUE),
+    lobster_number= n()
+  )
+
+# another option is tally, but have to give group_by() first, then do not need to write out summarize
+
+```
+
+#### Find confidence intervals
+
+Use t-test() fxn to find conf int for one sample and perform t tests to compare means of two samples
+
+```{r}
+
+# if calculate 95% conf int: means if took more samples from pop that in 95% of intervals reported we would expect to find actual pop mean
+
+# will be using t dist, not z
+# t dist is normal dist that acounts for increased uncertainty as sample size gets smaller, with n<30 z and t very sim
+
+# want some meas of uncertainty
+
+ivee_lobsters <- lobster_tidy %>%
+  filter(site== "IVEE") %>% 
+  pull(size_mm)
+
+# pull() creates vector instead of df, call in console to view-- need vector for t.test()
+
+t.test(ivee_lobsters)
+
+# t score is measure of how diff sample score is from claim, p val tells us if a null hyp is true, the probability that could've taken random sample of pop is mean=0-- very small probability
+# most interested in CI: if i took a bunch more samples from pop, I would expect 95% of samples to contain true pop mean
+
+```
+
+#### Two-sample t-test to compare means
+
+We want to ask if there is a sig diff in lobster lengths at Naples and Mohawk reefs?
+
+We've done our nec exploratory analyses to determine that a two-sample t-test for means comparison is approp
+
+```{r}
+# 2 ways to do, same output
+
+# 1: create vectors
+
+napl_sample <- lobster_tidy %>% 
+  filter(site== "NAPL") %>% 
+  pull(size_mm)
+
+mohk_sample <- lobster_tidy %>% 
+  filter(site== "MOHK") %>% 
+  pull(size_mm)
+
+mn_ttest <- t.test(napl_sample, mohk_sample)
+
+mn_ttest
+
+```
+
+There is a signif diff in lobster lengths btwn Naples and Mohawk Reef -- sig diff (p val) should be least interesting part reported (t(df)= statistic, p< .001, alpha=.05)
+
+```{r}
+# 2: create df
+# using model format-- less tedious and also get thinking about regression
+
+lobster_mn <- lobster_tidy %>% 
+  filter(site %in% c("NAPL", "MOHK"))
+
+mn_ttest2 <- t.test(size_mm ~ site, data= lobster_mn)
+
+mn_ttest2
+# same results as separated vector form
+# p val tells very unlikely that means would be this diff if they were drawn from same pop
+
+mn_ttest2$p.value
+mn_ttest2$statistic
+mn_ttest2$conf.int
+
+# want to include these in actual text
+```
+
+There is a sig diff (t(1850.8)= -19.849, p= 2.2e-16) -- issues w reproducibility, if anything in the above code were to change, these outputs would change
+
+Here is the p-value: `r mn_ttest2$p.value`
+
+Here is my t-stat: `r mn_ttest2$statistic`
+
+#### Now a heatmap!
+
+```{r}
+
+lobster_ys <- lobster_parse_date %>% 
+  count(obs_year, site)
+
+ggplot(data= lobster_ys, aes(x= obs_year, y= site)) +
+  geom_tile(aes(fill= n))
+
 ```
 
